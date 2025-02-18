@@ -9,6 +9,8 @@
   packages = [
     pkgs.postgresql_16
     pkgs.mariadb
+    config.languages.python.package.pkgs.psycopg2
+    config.languages.python.package.pkgs.pymysql
   ];
 
   languages.python = {
