@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 from sqlalchemy import text
 
 from sqlbag import (
@@ -9,6 +7,7 @@ from sqlbag import (
     drop_database,
     temporary_database,
 )
+from sqlbag.createdrop import build_url
 
 
 def exists(db_url):
@@ -21,7 +20,10 @@ def exists(db_url):
 def test_createdrop(tmpdir):
     sqlite_path = str(tmpdir / "testonly.db")
 
-    urls = ["postgresql:///sqlbag_testonly", "mysql+pymysql:///sqlbag_testonly"]
+    urls = [
+        build_url("postgresql", database="sqlbag_testonly"),
+        build_url("mysql", database="sqlbag_testonly"),
+    ]
 
     for db_url in urls:
         drop_database(db_url)

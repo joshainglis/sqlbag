@@ -1,7 +1,6 @@
 from flask import Flask
 from sqlalchemy import text
 
-from common import db  # flake8: noqa
 from sqlbag.flask import FS, session_setup
 
 
@@ -21,5 +20,6 @@ def test_flask_integration(db):
 
     client = app.test_client()
     result = client.get("/")
+    assert result.status_code == 200
 
     # TODO: should test this a lot more thoroughly

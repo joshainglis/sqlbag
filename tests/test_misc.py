@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 from sqlbag import quoted_identifier
 
 

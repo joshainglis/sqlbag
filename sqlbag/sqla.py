@@ -1,48 +1,42 @@
 """Miscellaneous helpful stuff for working with the SQLAlchemy core."""
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import copy
 import getpass
 from contextlib import contextmanager
-from packaging import version
+from typing import Any, Generator, Union
 
 import sqlalchemy
-import sqlalchemy.engine.url
-import sqlalchemy.exc
-import sqlalchemy.orm
-import sqlalchemy.orm.session
-from six import string_types
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import scoped_session, sessionmaker
+from packaging import version
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.url import make_url, URL
+from sqlalchemy.exc import OperationalError, ProgrammingError, InternalError
+from sqlalchemy.orm import scoped_session, sessionmaker, Session
 from sqlalchemy.pool import NullPool
-from sqlalchemy.sql import text
 
 from .util_mysql import MYSQL_KILLQUERY_FORMAT as MYSQL_KILL
 from .util_pg import PSQL_KILLQUERY_FORMAT_INCLUDING_DROPPED as PG_KILL
 
 DB_ERROR_TUPLE = (
-    sqlalchemy.exc.OperationalError,
-    sqlalchemy.exc.InternalError,
-    sqlalchemy.exc.ProgrammingError,
+    OperationalError,
+    InternalError,
+    ProgrammingError,
 )
 
-SCOPED_SESSION_MAKERS = {}
-
-SQLA14 = version.parse(sqlalchemy.__version__) >= version.parse('1.4.0b1')
+SQLA14 = version.parse(sqlalchemy.__version__) >= version.parse("1.4.0b1")
 
 
 try:
     import secrets
+
     scopefunc = secrets.token_hex
 except ImportError:
     import random
+
     scopefunc = random.random
 
 
-def copy_url(db_url):
+def copy_url(db_url: Union[str, URL]) -> URL:
     """
     Args:
         db_url: Already existing SQLAlchemy :class:`URL`, or URL string.
@@ -54,7 +48,7 @@ def copy_url(db_url):
     return copy.copy(make_url(db_url))
 
 
-def alter_url(db_url, **kwargs):
+def alter_url(db_url: Union[str, URL], **kwargs: Any) -> URL:
     """
     Args:
         db_url: Already existing SQLAlchemy :class:`URL`, or URL string.
@@ -68,102 +62,107 @@ def alter_url(db_url, **kwargs):
     if SQLA14:
         return db_url.set(**kwargs)
     else:
-        db_url = copy.copy(db_url)
+        new_url = copy.copy(db_url)
         for k, v in kwargs.items():
-            setattr(db_url, k, v)
-        return db_url
-
-def connection_from_s_or_c(s_or_c):
-    """Args:
-        s_or_c (str): Either an SQLAlchemy ORM :class:`Session`, or a core
-            :class:`Connection`.
-
-    Returns:
-        Connection: An SQLAlchemy Core connection. If you passed in a
-            :class:`Session`, it's the Connection associated with that session.
-
-    Get you a method that can do both. This is handy for writing methods
-    that can accept both :class:`Session`s and core :class:`Connection`s.
-
-    """
-    try:
-        s_or_c.engine
-        return s_or_c
-    except AttributeError:
-        return s_or_c.connection()
+            setattr(new_url, k, v)
+        return new_url
 
 
-def get_raw_autocommit_connection(url_or_engine_or_connection):
+def connection_from_s_or_c(s_or_c: Union[Session, Connection]) -> Connection:
     """
     Args:
-        url_or_engine_or_connection (str): A URL string or SQLAlchemy engine object, or already existing DBAPI connection.
+        s_or_c: Either an SQLAlchemy ORM :class:`Session`, or a core :class:`Connection`.
 
     Returns:
-        A connection in autocommit mode.
+        Connection: An SQLAlchemy Core connection.
 
-    Sometimes you want just want to autocommit.
-
+    Handles both Sessions and Connections.
     """
-    x = url_or_engine_or_connection
-
-    if isinstance(x, string_types):
-        import psycopg2
-
-        c = psycopg2.connect(x)
-        x = c
-    elif isinstance(x, Engine):
-        sqla_connection = x.connect()
-        sqla_connection.execution_options(isolation_level="AUTOCOMMIT")
-        sqla_connection.detach()
-        x = sqla_connection.connection.connection
-    elif hasattr(x, "protocol_version"):
-        # this is already a DBAPI connection object
-        pass
+    if isinstance(s_or_c, Session):
+        return s_or_c.connection()
+    elif isinstance(s_or_c, Connection):
+        return s_or_c
     else:
-        raise ValueError("must pass a url or engine or DBAPI connection object")
-    x.autocommit = True
-    return x
+        raise TypeError("Expected Session or Connection, got: {}".format(type(s_or_c)))
 
 
-def session(*args, **kwargs):
+def get_raw_autocommit_connection(
+    url_or_engine_or_connection: Union[str, Engine, Connection],
+) -> Any:
     """
+    Args:
+        url_or_engine_or_connection: A URL string, SQLAlchemy Engine, or DBAPI connection.
+
+    Returns:
+        A DBAPI connection in autocommit mode.
+    """
+    if isinstance(url_or_engine_or_connection, str):
+        url = make_url(url_or_engine_or_connection)
+        if url.drivername.startswith("postgresql"):
+            import psycopg2
+
+            conn = psycopg2.connect(url_or_engine_or_connection)
+        elif url.drivername.startswith("mysql"):
+            import pymysql
+
+            conn = pymysql.connect(
+                host=url.host,
+                user=url.username,
+                password=url.password,
+                database=url.database,
+                port=url.port or 3306,
+            )  # default port if none provided
+        else:
+            raise NotImplementedError(
+                "Only PostgreSQL and MySQL are supported with string URLs"
+            )
+        conn.autocommit = True
+        return conn
+
+    elif isinstance(url_or_engine_or_connection, Engine):
+        with url_or_engine_or_connection.connect() as sqla_connection:
+            sqla_connection = sqla_connection.execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
+            sqla_connection.detach()
+            return sqla_connection.connection.dbapi_connection
+
+    elif hasattr(url_or_engine_or_connection, "protocol_version"):
+        url_or_engine_or_connection.autocommit = True
+        return url_or_engine_or_connection
+    else:
+        raise ValueError("Must pass a URL, Engine, or DBAPI connection object")
+
+
+def session(*args: Any, **kwargs: Any) -> Session:
+    """
+    Args:
+        *args: Positional arguments for create_engine.
+        **kwargs: Keyword arguments for create_engine.
+
     Returns:
         Session: A new SQLAlchemy :class:`Session`.
 
-    Boilerplate method to create a database session.
-
-    Pass in the same parameters as you'd pass to create_engine. Internally,
-    this uses SQLAlchemy's `scoped_session` session constructors, which means
-    that calling it again with the same parameters will reuse the
-    `scoped_session`.
-
-    :class:`S <S>` creates a session in the same way but in the form of a
-    context manager.
+    Creates a database session.  Uses a simple sessionmaker, *not* a scoped_session.
     """
-    Session = get_scoped_session_maker(*args, **kwargs)
+    engine = create_engine(*args, **kwargs)
+    Session = sessionmaker(bind=engine)
     return Session()
 
 
 @contextmanager
-def S(*args, **kwargs):
-    """Boilerplate context manager for creating and using sessions.
+def S(*args: Any, **kwargs: Any) -> Generator[Session, None, None]:
+    """Context manager for creating and using sessions.
 
-    This makes using a database session as simple as:
+    with S('postgresql:///databasename') as s:
+        s.execute(text('select 1;'))
 
-    .. code-block:: python
-
-        with S('postgresql:///databasename') as s:
-            s.execute(text('select 1;'))
-
-    Does `commit()` on close, `rollback()` on exception.
-
-    Also uses `scoped_session` under the hood.
-
+    Commits on close, rolls back on exception.
     """
-    Session = get_scoped_session_maker(*args, **kwargs)
-
+    engine = create_engine(*args, **kwargs)
+    Session = sessionmaker(bind=engine)
+    session = Session()
     try:
-        session = Session()
         yield session
         session.commit()
     except Exception:
@@ -171,109 +170,113 @@ def S(*args, **kwargs):
         raise
     finally:
         session.close()
+        engine.dispose()
 
 
-def get_scoped_session_maker(*args, **kwargs):
-    """
-    Creates a scoped session maker, and saves it for reuse next time.
-
-    """
-
-    tup = (args, frozenset(kwargs.items()))
-    if tup not in SCOPED_SESSION_MAKERS:
-        SCOPED_SESSION_MAKERS[tup] = scoped_session(
-            sessionmaker(bind=create_engine(*args, **kwargs)), scopefunc=scopefunc
-        )
-    return SCOPED_SESSION_MAKERS[tup]
+def get_scoped_session_maker(*args: Any, **kwargs: Any) -> scoped_session:
+    """Creates a scoped session maker."""
+    engine = create_engine(*args, **kwargs)
+    return scoped_session(sessionmaker(bind=engine), scopefunc=scopefunc)
 
 
-def raw_connection(s_or_c_or_rawc):
+def raw_connection(s_or_c_or_rawc: Union[Session, Connection, Any]) -> Any:
     """
     Args:
-        s_or_c_or_rawc (str): SQLAlchemy :class:`Session` or :class:`Connection` or already existing DBAPI connection.
+        s_or_c_or_rawc: SQLAlchemy Session, Connection, or DBAPI connection.
+
     Returns:
-        connection (str): Raw DBAPI connection
-
-    Get the raw DBAPI connection from
+        connection: Raw DBAPI connection.
     """
-    x = s_or_c_or_rawc
-
     try:
-        return connection_from_s_or_c(x).connection
+        conn = connection_from_s_or_c(s_or_c_or_rawc).connection
+        if hasattr(conn, "dbapi_connection"):
+            return conn.dbapi_connection
     except TypeError:
-        return x
+        return s_or_c_or_rawc
 
 
-def raw_execute(s, statements):
-    raw_connection(s).cursor().execute(statements)
+def raw_execute(s_or_c: Union[Session, Connection], statements: str) -> None:
+    """
+    Args:
+        s_or_c: SQLAlchemy Session or Connection
+        statements: raw SQL string
+    Executes a raw SQL statement using the underlying DBAPI connection.
+    """
+    raw_conn = raw_connection(s_or_c)
+    with raw_conn.cursor() as cursor:
+        cursor.execute(statements)
 
 
 @contextmanager
-def C(*args, **kwargs):
+def C(*args: Any, **kwargs: Any) -> Generator[Connection, None, None]:
     """
-    Hello it's me.
-    """
-    e = create_engine(*args, **kwargs)
-    c = e.connect()
-    trans = c.begin()
+    Context manager for direct engine connections.
 
+    with C('postgresql:///databasename') as c:
+        c.execute(text('select 1;'))
+    """
+    engine = create_engine(*args, **kwargs)
+    connection = engine.connect()
+    transaction = connection.begin()
     try:
-        yield c
-        trans.commit()
+        yield connection
+        transaction.commit()
     except Exception:
-        trans.rollback()
+        transaction.rollback()
         raise
     finally:
-        c.close()
+        connection.close()
+        engine.dispose()  # Clean up the engine
 
 
 @contextmanager
-def admin_db_connection(db_url):
+def admin_db_connection(db_url: Union[str, URL]) -> Generator[Connection, None, None]:
+    """Context manager for administrative database connections."""
+
     url = make_url(db_url)
     dbtype = url.get_dialect().name
+    new_url = copy.copy(url)
 
     if dbtype == "postgresql":
-        url = alter_url(url, database='')
-
-        if not url.username:
-            url = alter_url(url, username=getpass.getuser())
-
-    elif not dbtype == "sqlite":
-        url = alter_url(url, database='')
-
-    if dbtype == "postgresql":
-        with C(url, poolclass=NullPool, isolation_level="AUTOCOMMIT") as c:
-            yield c
+        new_url = alter_url(new_url, database="postgres")
+        if not new_url.username:
+            new_url = alter_url(new_url, username=getpass.getuser())
 
     elif dbtype == "mysql":
-        with C(url, poolclass=NullPool) as c:
-            c.execute(
-                text(
-                    """
-                SET sql_mode = 'ANSI';
-            """
-                )
-            )
-            yield c
+        new_url = alter_url(new_url, database="")
 
     elif dbtype == "sqlite":
-        with C(url, poolclass=NullPool) as c:
-            yield c
+        pass
+    else:
+        raise NotImplementedError(f"Admin connections not supported for {dbtype}")
+
+    engine = create_engine(new_url, poolclass=NullPool)
+    if dbtype == "postgresql":
+        with engine.connect().execution_options(
+            isolation_level="AUTOCOMMIT"
+        ) as connection:
+            yield connection
+    elif dbtype == "mysql":
+        with engine.connect() as connection:
+            connection.execute(text("SET sql_mode = 'ANSI';"))
+            yield connection
+    else:  # sqlite
+        with engine.connect() as connection:
+            yield connection
+    engine.dispose()
 
 
-def _killquery(dbtype, dbname, hardkill):
+def _killquery(dbtype: str, dbname: str = None, hardkill: bool = False) -> str:
     where = []
 
     if dbtype == "postgresql":
         sql = PG_KILL
-
         if not hardkill:
             where.append("psa.state = 'idle'")
         if dbname:
             where.append("datname = :databasename")
     elif dbtype == "mysql":
         sql = MYSQL_KILL
-
         if not hardkill:
             where.append("COMMAND = 'Sleep'")
         if dbname:
@@ -281,44 +284,119 @@ def _killquery(dbtype, dbname, hardkill):
     else:
         raise NotImplementedError
 
-    where = " and ".join(where)
-
-    if where:
-        sql += " and {}".format(where)
+    where_clause = " and ".join(where)
+    if where_clause:
+        sql += " and {}".format(where_clause)
     return sql
 
 
-def kill_other_connections(s_or_c, dbname=None, hardkill=False):
-    """
-    Args:
-        s_or_c: SQLAlchemy Session or Connection. Needs to have the appropriate permssions to kill connections. For best results use :class:`admin_db_connection`.
-        dbname: Name of database. If `None`, kills connections to all databases on the server.
+def kill_other_connections(
+    s_or_c: Union[Session, Connection], dbname: str = None, hardkill: bool = False
+) -> None:
+    """Kills other connections to a database (or entire server)."""
 
-    Returns:
-        None
-
-    Kill other connections to this database (or entire database server).
-    """
     c = connection_from_s_or_c(s_or_c)
-
     dbtype = c.engine.dialect.name
-
     killquery = _killquery(dbtype, dbname=dbname, hardkill=hardkill)
 
-    if dbname:
-        results = c.execute(text(killquery), dict(databasename=dbname))
-    else:  # pragma: no cover
-        results = c.execute(text(killquery))
-
     if dbtype == "mysql":
-        for x in results:
-            kill = text("kill connection :pid")
-
+        result = c.execute(text(killquery), {"databasename": dbname} if dbname else {})
+        for row in result:
             try:
-                c.execute(kill, dict(pid=x.process_id))
-            except DB_ERROR_TUPLE as e:  # pragma: no cover
-                code, message = e.orig.args
-                if "Unknown thread id" in message:
+                c.execute(text(f"kill connection {row.process_id}"))
+            except DB_ERROR_TUPLE as e:
+                if isinstance(e.orig, Exception) and "Unknown thread id" in str(e.orig):
                     pass
                 else:
                     raise
+    elif dbtype == "postgresql":
+        c.execute(text(killquery), {"databasename": dbname} if dbname else {})
+    else:
+        raise NotImplementedError(f"kill_other_connections not supported for {dbtype}")
+
+
+def table_exists(
+    session_or_connection: Union[Session, Connection],
+    tablename: str,
+    schemaname: str = None,
+) -> bool:
+    """Checks if a table exists."""
+    c = connection_from_s_or_c(session_or_connection)
+    return c.engine.dialect.has_table(c, tablename, schema=schemaname)
+
+
+def get_dbtype(session_or_connection: Union[Session, Connection]) -> str:
+    """Gets the database type (e.g., 'postgresql', 'mysql')."""
+    c = connection_from_s_or_c(session_or_connection)
+    return c.engine.dialect.name
+
+
+def sql_to_print(sql: str, params: Any = None) -> str:
+    """Formats SQL for printing (for debugging)."""
+    if params:
+        if isinstance(params, (list, tuple)):
+            result = sql.format(*params)
+        elif isinstance(params, dict):
+            result = sql.format(**params)
+        else:
+            result = sql
+    else:
+        result = sql
+    return result
+
+
+def execute_sql(
+    session_or_connection: Union[Session, Connection],
+    sql: str,
+    params: Any = None,
+    dryrun: bool = False,
+    quiet: bool = False,
+) -> Any:
+    if not quiet:
+        sql_statement = sql_to_print(sql, params)
+        print(sql_statement)
+
+    if dryrun:
+        return None
+
+    c = connection_from_s_or_c(session_or_connection)
+
+    try:
+        if params:
+            result = c.execute(text(sql), params)
+        else:
+            result = c.execute(text(sql))
+        return result
+    except DB_ERROR_TUPLE as e:
+        print(e)
+        raise
+
+
+def execute_fetchall(
+    session_or_connection: Union[Session, Connection],
+    sql: str,
+    params: Any = None,
+    dryrun: bool = False,
+    quiet: bool = False,
+) -> list:
+    """Executes SQL and fetches all results."""
+    result = execute_sql(session_or_connection, sql, params, dryrun, quiet)
+    return result.fetchall() if result else []
+
+
+def execute_fetchone(
+    session_or_connection: Union[Session, Connection],
+    sql: str,
+    params: Any = None,
+    dryrun: bool = False,
+    quiet: bool = False,
+) -> Any:
+    """Executes SQL and fetches one result."""
+    result = execute_sql(session_or_connection, sql, params, dryrun, quiet)
+    return result.fetchone() if result else None
+
+
+def execute_returns_result(sql: str) -> bool:
+    """Checks if a SQL statement is expected to return results."""
+    lsql = sql.strip().lower()
+    return any(lsql.startswith(x) for x in ["select", "explain", "returning", "pragma"])

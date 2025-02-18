@@ -1,0 +1,50 @@
+[project]
+name = "sqlbag"
+version = "0.0.1"
+authors = [{ name = "Robert Lechte", email = "robertlechte@gmail.com" }]
+requires-python = ">=3.9"
+readme = "README.md"
+license = "Unlicense"
+dependencies = [
+    "pendulum",
+    "sqlalchemy>=2.0.38",
+    "flask>=3.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/djrobstep/sqlbag"
+Repository = "https://github.com/djrobstep/sqlbag"
+
+
+[dependency-groups]
+mysql = [
+    "pymysql>=1.1.1",
+]
+postgresql = [
+    "psycopg2>=2.9.3",
+]
+all = [
+    { include = "mysql" },
+    { include = "postgresql" },
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "typing" },
+    { include-group = "mysql"},
+    { include-group = "postgresql"},
+]
+typing = [
+    "mypy",
+]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "pytest-sugar",
+    "mock",
+]
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

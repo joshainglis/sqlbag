@@ -1,10 +1,8 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 from collections import OrderedDict
 
 import six
 from sqlalchemy import Column, Integer, String
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 
 from sqlbag import Base as SqlxBase
 from sqlbag import S, metadata_from_session, temporary_database

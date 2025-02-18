@@ -1,101 +1,128 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
-import io
 import sys
 from pathlib import Path
+from typing import Generator, List, TextIO, Tuple, Union
+
+from sqlalchemy.orm import Session
+from sqlalchemy.engine import Connection
 
 from .sqla import raw_execute
 
 
-def quoted_identifier(identifier):
+def quoted_identifier(identifier: str) -> str:
     """One-liner to add double-quote marks around an SQL identifier
     (table name, view name, etc), and to escape double-quote marks.
 
     Args:
-        identifier(str): the unquoted identifier
+        identifier: the unquoted identifier
     """
 
     return '"{}"'.format(identifier.replace('"', '""'))
 
 
-def sql_from_file(fpath):
+def sql_from_file(fpath: Union[str, Path]) -> str:
     """
     Args:
-        fpath (str): The path to the file.
+        fpath: The path to the file.
 
     Returns:
-        sql (str): The file contents as a string, with any whitespace stripped
-            from the start and end.
+        The file contents as a string, stripped of leading/trailing whitespace.
 
-    Merely opens a file and return the contents stripped of whitespace.
+    Reads a SQL file and returns its content.
     """
-    with io.open(str(fpath)) as f:
-        return f.read().strip()
+    try:
+        with open(str(fpath), encoding="utf-8") as f:  # Specify UTF-8 encoding
+            return f.read().strip()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"SQL file not found: {fpath}")
+    except Exception as e:
+        raise OSError(f"Error reading SQL file {fpath}: {e}")
 
 
-def sql_from_folder_iter(fpath):
+def sql_from_folder_iter(
+    fpath: Union[str, Path],
+) -> Generator[Tuple[Path, str], None, None]:
     """
     Args:
-        fpath (str): The path to the file.
-    Returns:
-        sql (str): The file contents as a string, with any whitespace stripped
-            from the start and end.
+        fpath: The path to the folder.
+    Yields:
+        Tuples of (file path, sql content) for each .sql file in the folder.
 
-    Iterate through all the .sql files in a folder.
+    Iterates through all .sql files in a folder (and subfolders).
     """
     folder = Path(fpath)
+    if not folder.is_dir():
+        raise ValueError(f"Path is not a directory: {fpath}")
 
     sql_files = sorted(folder.glob("**/*.sql"))
 
-    for fpath in sql_files:
-        sql = sql_from_file(fpath)
-        if sql:
-            yield fpath, sql
+    for sql_file in sql_files:
+        try:
+            sql = sql_from_file(sql_file)
+            if sql:  # Only yield if the file contains SQL
+                yield sql_file, sql
+        except Exception as e:
+            print(f"Error processing {sql_file}: {e}", file=sys.stderr)
+            raise
 
 
-def sql_from_folder(fpath):
-    return list(sql for _, sql in sql_from_folder_iter(fpath))
-
-
-def load_sql_from_folder(s, fpath, verbose=False, out=None):
+def sql_from_folder(fpath: Union[str, Path]) -> List[str]:
     """
     Args:
-        s (Session): Applies the SQL to this session.
-        fpath (str): The path to the file.
-        verbose (bool): Prints some information as it loads files.
-        out (stream): Change where verbose mode prints to. defaults to sys.stdout
+        fpath: The path to the folder.
 
     Returns:
-        sql (str): The file contents as a string, with any whitespace stripped from the start and end.
+       A list of SQL strings from all .sql files in the folder.
+    """
+    return [sql for _, sql in sql_from_folder_iter(fpath)]
 
-    Iterate through all the .sql files in a folder.
+
+def load_sql_from_folder(
+    s_or_c: Union[Session, Connection],
+    fpath: Union[str, Path],
+    verbose: bool = False,
+    out: TextIO = None,
+) -> None:
+    """
+    Args:
+        s_or_c: SQLAlchemy Session or Connection.
+        fpath: The path to the folder.
+        verbose: Prints information as it loads files.
+        out: Output stream for verbose messages (defaults to sys.stdout).
+
+    Executes SQL from all .sql files in a folder.
     """
 
     if verbose:
-        if not out:
-            out = sys.stdout  # pragma: no cover
-        out.write("Running all .sql files in: {}".format(fpath))
+        out = out or sys.stdout  # Use sys.stdout if 'out' is None
+        out.write(f"Running all .sql files in: {fpath}\n")
 
-    for fpath, text in sql_from_folder_iter(fpath):
+    for file_path, text in sql_from_folder_iter(fpath):
         if verbose:
-            out.write("    Running SQL in: {}".format(fpath))
-        raw_execute(s, text)
+            out.write(f"    Running SQL in: {file_path}\n")
+        try:
+            raw_execute(s_or_c, text)
+        except Exception as e:
+            print(f"Error executing SQL from {file_path}: {e}", file=sys.stderr)
+            raise
 
 
-def load_sql_from_file(s_or_c, fpath):
+def load_sql_from_file(
+    s_or_c: Union[Session, Connection], fpath: Union[str, Path]
+) -> str:
     """
     Args:
-        s_or_c: :class:`Session` or :class:`Connection` to use.
-        fpath (str): The path to the file.
+        s_or_c: SQLAlchemy Session or Connection.
+        fpath: The path to the file.
     Returns:
-        sql (str): The sql that was executed
+        The SQL that was executed.
 
-    Iterate through all the .sql files in a folder.
+    Executes SQL from a single file.
     """
-
-    text = sql_from_file(fpath)
-
-    if text:
-        raw_execute(s_or_c, text)
-
-    return text
+    try:
+        text = sql_from_file(fpath)
+        if text:
+            raw_execute(s_or_c, text)
+        return text
+    except Exception as e:
+        print(f"Error executing SQL from {fpath}: {e}", file=sys.stderr)
+        raise

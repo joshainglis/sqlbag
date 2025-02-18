@@ -1,6 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
-import copy
 import getpass
 import os
 import random
@@ -10,10 +7,8 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import InternalError, OperationalError, ProgrammingError
-from sqlalchemy.engine.base import Connection
 
-from sqlbag import quoted_identifier
-
+from .misc import quoted_identifier
 from .sqla import (
     admin_db_connection,
     connection_from_s_or_c,
@@ -37,47 +32,42 @@ def database_exists(db_url, test_can_select=False):
 
 
 def can_select(url):
-    select1 = text("select 1")
-
+    txt = "select 1"
     e = create_engine(url)
 
     try:
-        with e.begin() as c:
-            c.execute(select1)
+        with e.connect() as conn:
+            conn.execute(text(txt))
         return True
     except (ProgrammingError, OperationalError, InternalError):
         return False
+    finally:
+        e.dispose()
 
 
 def _database_exists(session_or_connection, name):
     c = connection_from_s_or_c(session_or_connection)
-    e = copy.copy(c.engine)
-    url = make_url(e.url)
+    url = make_url(c.engine.url)
     dbtype = url.get_dialect().name
 
     if dbtype == "postgresql":
-        EXISTENCE = text(
-            """
+        EXISTENCE = """
             SELECT 1
             FROM pg_catalog.pg_database
-            WHERE datname = :name
+            WHERE datname = :dbname
         """
-        )
-
-        result = c.execute(EXISTENCE, dict(name=name)).scalar()
-
+        # Use a tuple for the parameters.  This is the crucial fix.
+        result = c.execute(text(EXISTENCE), {"dbname": name}).scalar()
         return bool(result)
+
     elif dbtype == "mysql":
-        EXISTENCE = text(
-            """
-            SELECT SCHEMA_NAME
-            FROM INFORMATION_SCHEMA.SCHEMATA
-            WHERE SCHEMA_NAME = :name
+        EXISTENCE = """
+            SELECT schema_name
+            FROM information_schema.schemata
+            WHERE schema_name = :dbname
         """
-        )
-
-        result = c.execute(EXISTENCE, dict(name=name)).scalar()
-
+        # Use a tuple for the parameters.
+        result = c.execute(text(EXISTENCE), {"dbname": name}).scalar()
         return bool(result)
 
 
@@ -91,9 +81,10 @@ def create_database(db_url, template=None, wipe_if_existing=False):
     if database_exists(target_url):
         return False
     else:
-
         if dbtype == "sqlite":
-            can_select(target_url)
+            engine = create_engine(target_url)
+            engine.connect().close()
+            engine.dispose()
             return True
 
         with admin_db_connection(target_url) as c:
@@ -106,9 +97,7 @@ def create_database(db_url, template=None, wipe_if_existing=False):
                 text(
                     """
                 create database {} {};
-            """.format(
-                        quoted_identifier(target_url.database), t
-                    )
+            """.format(quoted_identifier(target_url.database), t)
                 )
             )
         return True
@@ -123,17 +112,19 @@ def drop_database(db_url):
     if database_exists(url):
         if dbtype == "sqlite":
             if name and name != ":memory:":
-                os.remove(name)
+                try:
+                    os.remove(name)
+                except FileNotFoundError:
+                    pass
                 return True
             else:
                 return False
         else:
             with admin_db_connection(url) as c:
                 if dbtype == "postgresql":
-
                     REVOKE = "revoke connect on database {} from public"
-                    revoke = text(REVOKE.format(quoted_identifier(name)))
-                    c.execute(revoke)
+                    revoke = REVOKE.format(quoted_identifier(name))
+                    c.execute(text(revoke))
 
                 kill_other_connections(c, name, hardkill=True)
 
@@ -141,9 +132,7 @@ def drop_database(db_url):
                     text(
                         """
                     drop database if exists {};
-                """.format(
-                            quoted_identifier(name)
-                        )
+                """.format(quoted_identifier(name))
                     )
                 )
             return True
@@ -162,41 +151,67 @@ def temporary_name(prefix="sqlbag_tmp_"):
     return tempname
 
 
+def build_url(
+    dialect="postgresql",
+    host=None,
+    port=None,
+    username=None,
+    password=None,
+    database=None,
+):
+    def userpass(u, p):
+        if u and p:
+            return f"{u}:{p}@"
+        elif u:
+            return f"{u}@"
+
+    if dialect == "postgresql":
+        host = host or os.getenv("PGHOST", "localhost")
+        port = port or os.getenv("PGPORT", "5432")
+        username = username or _current_username() or "postgres"
+        database = database or "postgres"
+        if host.startswith("/"):
+            url = f"postgresql://{userpass(username, password)}/{database}?host={host}&port={port}"
+        else:
+            url = f"postgresql://{userpass(username, password)}{host}:{port}/{database}"
+    elif dialect == "mysql":
+        host = host or os.getenv("MYSQL_UNIX_PORT", "localhost")
+        port = port or "3306"
+        username = username or "root"
+        if host.startswith("/"):
+            url = f"mysql+pymysql://{userpass(username, password)}/{database}?unix_socket={host}"
+        else:
+            url = f"mysql+pymysql://{userpass(username, password)}{host}:{port}/{database}"
+    elif dialect == "sqlite":
+        url = f"sqlite:///{database}"
+    else:
+        raise ValueError("Unsupported dialect: {}".format(dialect))
+    return url
+
+
 @contextmanager
-def temporary_database(dialect="postgresql", do_not_delete=False, host=None):
+def temporary_database(dialect="postgresql", do_not_delete=False):
     """
     Args:
         dialect(str): Type of database to create (either 'postgresql', 'mysql', or 'sqlite').
         do_not_delete: Do not delete the database as this method usually would.
+        host: Manually specify the host
 
-    Creates a temporary database for the duration of the context manager scope. Cleans it up when finished unless do_not_delete is specified.
+    Creates a temporary database for the duration of the context manager scope.  Cleans it up when finished unless
+    do_not_delete is specified.
 
-    PostgreSQL, MySQL/MariaDB, and SQLite are supported. This method's mysql creation code uses the pymysql driver, so make sure you have that installed.
+    PostgreSQL, MySQL/MariaDB (requires pymysql), and SQLite are supported.
     """
-
-    host = host or ""
-
     if dialect == "sqlite":
-        tmp = tempfile.NamedTemporaryFile(delete=False)
-
-        try:
-            url = "sqlite:///" + tmp.name
+        with tempfile.NamedTemporaryFile(
+            delete=not do_not_delete, delete_on_close=False
+        ) as tmp:
+            db_name = tmp.name
+            url = build_url(dialect=dialect, database=db_name)
             yield url
 
-        finally:
-            if not do_not_delete:
-                os.remove(tmp.name)
-
     else:
-        tempname = temporary_name()
-
-        current_username = _current_username()
-
-        url = "{}://{}@{}/{}".format(dialect, current_username, host, tempname)
-
-        if url.startswith("mysql:"):
-            url = url.replace("mysql:", "mysql+pymysql:", 1)
-
+        url = build_url(dialect=dialect, database=temporary_name())
         try:
             create_database(url)
             yield url

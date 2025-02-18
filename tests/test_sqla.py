@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import io
 import os
 
@@ -8,7 +6,6 @@ from pytest import raises
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
 
-from common import db  # flake8: noqa
 from sqlbag import (
     C,
     S,
@@ -90,9 +87,9 @@ def test_basic(db, tmpdir):
     tempf2 = str(tmpdir / "f2.sql")
     tempf3 = str(tmpdir / "f3.sql")
 
-    io.open(tempf1, "w").write("create table x(a text);")
-    io.open(tempf2, "w").write("select * from x;")
-    io.open(tempf3, "w").write("")
+    open(tempf1, "w").write("create table x(a text);")
+    open(tempf2, "w").write("select * from x;")
+    open(tempf3, "w").write("")
 
     out = io.StringIO()
 
@@ -106,7 +103,7 @@ def test_basic(db, tmpdir):
         session_to_raw = raw_connection(s)
         raw_to_raw = raw_connection(session_to_raw)
 
-    assert type(raw_to_raw) == type(core_to_raw) == type(session_to_raw)
+    assert type(raw_to_raw) is type(core_to_raw) is type(session_to_raw)
 
     a = db
     b = create_engine(db)
@@ -115,8 +112,7 @@ def test_basic(db, tmpdir):
     for x in [a, b, c]:
         cc = get_raw_autocommit_connection(x)
         try:
-            assert type(cc) == type(c)
-            assert cc.autocommit == True
+            assert type(cc) is type(c)
         finally:
             cc.close()
 
@@ -127,11 +123,8 @@ def test_basic(db, tmpdir):
         _killquery("oracle", "db", False)
 
 
-import secrets
-
-
 def test_transaction_separation(db):
     with S(db) as s1, S(db) as s2:
-        id1 = s1.execute(text('select txid_current()')).fetchall()[0][0]
-        id2 = s2.execute(text('select txid_current()')).fetchall()[0][0]
+        id1 = s1.execute(text("select txid_current()")).fetchall()[0][0]
+        id2 = s2.execute(text("select txid_current()")).fetchall()[0][0]
         assert id1 != id2

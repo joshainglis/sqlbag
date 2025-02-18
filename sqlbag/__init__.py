@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """sqlbag is a bunch of handy SQL things.
 
 This is a whole bunch of useful boilerplate and helper methods, for working
@@ -6,8 +5,13 @@ with SQL databases, particularly PostgreSQL.
 
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
+from .createdrop import (
+    database_exists,
+    create_database,
+    drop_database,
+    temporary_database,
+    can_select,
+)
 from .misc import (
     quoted_identifier,
     load_sql_from_folder,
@@ -15,8 +19,7 @@ from .misc import (
     sql_from_file,
     sql_from_folder,
     sql_from_folder_iter,
-)  # noqa
-
+)
 from .sqla import (
     S,
     raw_execute,
@@ -31,25 +34,49 @@ from .sqla import (
     alter_url,
     connection_from_s_or_c,
     C,
-)  # noqa
-
+)
 from .sqla_orm import (
     row2dict,
     Base,
     metadata_from_session,
     sqlachanges,
     get_properties,
-)  # noqa
-
-from .createdrop import (
-    database_exists,
-    create_database,
-    drop_database,
-    temporary_database,
-    can_select,
-)  # noqa
+)
 
 try:
     from . import pg
 except ImportError:
     pg = None
+
+__all__ = [
+    "Base",
+    "C",
+    "DB_ERROR_TUPLE",
+    "S",
+    "_killquery",
+    "admin_db_connection",
+    "alter_url",
+    "can_select",
+    "connection_from_s_or_c",
+    "copy_url",
+    "create_database",
+    "database_exists",
+    "drop_database",
+    "get_properties",
+    "get_raw_autocommit_connection",
+    "kill_other_connections",
+    "load_sql_from_file",
+    "load_sql_from_folder",
+    "metadata_from_session",
+    "pg",
+    "quoted_identifier",
+    "raw_connection",
+    "raw_execute",
+    "row2dict",
+    "session",
+    "sql_from_file",
+    "sql_from_folder",
+    "sql_from_folder_iter",
+    "sqlachanges",
+    "temporary_database",
+]

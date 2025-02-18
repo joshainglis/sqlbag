@@ -1,8 +1,4 @@
-# -*- coding: utf-8 -*-
-
-from __future__ import absolute_import, division, print_function, unicode_literals
-
-from flask import _app_ctx_stack, current_app
+from flask import current_app, g
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 from werkzeug.local import LocalProxy
@@ -12,22 +8,26 @@ COMMIT_AFTER_REQUEST = []
 
 
 def session_setup(app):
-    """Args:
+    """
+    Args:
         app (Flask Application): The flask application to set up.
 
     Wires up any sessions created with `FS` to commit automatically once the request response is complete.
+    This also handles removing the session on application context teardown.
     """
-    f = flask_smart_after_request
-    fteardown = flask_smart_teardown_appcontext
 
-    funcs = app.after_request_funcs.get(None, [])
+    @app.after_request
+    def after_request_handler(response):
+        is_error = 400 <= response.status_code < 600
+        for do_commit, scoped in zip(COMMIT_AFTER_REQUEST, FLASK_SCOPED_SESSION_MAKERS):
+            if do_commit and not is_error:
+                scoped.commit()
+        return response
 
-    if f not in funcs:
-        funcs.append(f)
-        app.after_request_funcs[None] = funcs
-
-    if fteardown not in app.teardown_appcontext_funcs:
-        app.teardown_appcontext_funcs.append(fteardown)
+    @app.teardown_appcontext
+    def teardown_appcontext_handler(exception=None):
+        for scoped in FLASK_SCOPED_SESSION_MAKERS:
+            scoped.remove()
 
 
 def FS(*args, **kwargs):
@@ -37,48 +37,30 @@ def FS(*args, **kwargs):
         kwargs: Same arguments as SQLAlchemy's create_engine.
 
     Returns:
-        scoped_session: An SQLAlchemy scoped_session object (for more details,
-            see SQLAlchemy docs).
+        scoped_session: An SQLAlchemy scoped_session object.
 
-    create this object in your initialization code.
-
-    >>> s = FS('postgresql:///webdb')
-
-    and make sure you've called `session_setup` somewhere in your init code also. After that, simply use it in your route methods like so:
-
-    >>> results = s.execute(text('select a from b'))
-
-    all usages of this `s` object within the same request will use this same session.
+    Creates a scoped session that's tied to the Flask application context.
     """
 
-    commit_after_request = kwargs.get("commit_after_request", True)
+    commit_after_request = kwargs.pop("commit_after_request", True)
 
+    def _scopefunc():
+        if not hasattr(g, "flask_scoped_sessions"):
+            g.flask_scoped_sessions = {}
+        return id(g.flask_scoped_sessions)
+
+    engine = create_engine(*args, **kwargs)
     s = scoped_session(
-        sessionmaker(bind=create_engine(*args, **kwargs)),
-        scopefunc=_app_ctx_stack.__ident_func__,
+        sessionmaker(bind=engine),
+        scopefunc=_scopefunc,
     )
 
     FLASK_SCOPED_SESSION_MAKERS.append(s)
-    COMMIT_AFTER_REQUEST.append(bool(commit_after_request))
+    COMMIT_AFTER_REQUEST.append(commit_after_request)
     return s
 
 
-def flask_smart_after_request(resp):
-    is_error = 400 <= resp.status_code < 600
-
-    for do_commit, scoped in zip(COMMIT_AFTER_REQUEST, FLASK_SCOPED_SESSION_MAKERS):
-        if do_commit:
-            if not is_error:
-                scoped.commit()
-    return resp
-
-
-def flask_smart_teardown_appcontext(exception=None):
-    for scoped in FLASK_SCOPED_SESSION_MAKERS:
-        scoped.remove()
-
-
-class Proxies(object):
+class Proxies:
     def __getattr__(self, name):
         def get_proxy():
             return getattr(current_app, name)
