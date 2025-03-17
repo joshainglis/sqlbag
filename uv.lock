@@ -616,7 +616,7 @@ wheels = [
 
 [[package]]
 name = "sqlbag"
-version = "0.0.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "flask" },
@@ -628,8 +628,6 @@ dependencies = [
 dev = [
     { name = "mock" },
     { name = "mypy" },
-    { name = "psycopg2" },
-    { name = "pymysql" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-sugar" },
@@ -654,9 +652,9 @@ typing = [
 
 [package.metadata]
 requires-dist = [
-    { name = "flask", specifier = ">=3.1.0" },
+    { name = "flask", specifier = ">=3" },
     { name = "pendulum" },
-    { name = "sqlalchemy", specifier = ">=2.0.38" },
+    { name = "sqlalchemy", specifier = ">=2" },
 ]
 
 [package.metadata.requires-dev]
@@ -664,8 +662,6 @@ all = []
 dev = [
     { name = "mock" },
     { name = "mypy" },
-    { name = "psycopg2", specifier = ">=2.9.3" },
-    { name = "pymysql", specifier = ">=1.1.1" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-sugar" },

@@ -32,12 +32,17 @@ in
     config.languages.python.package.pkgs.pytest-sugar
     config.languages.python.package.pkgs.mock
     config.languages.python.package.pkgs.mypy
+    config.languages.python.package.pkgs.packaging
+    config.languages.python.package.pkgs.hatchling
+    config.languages.python.package.pkgs.uv
     sqlbag
   ];
 
   languages.python = {
     enable = true;
     package = python;
+    uv.enable = true;
+    venv.enable = true;
   };
 
   services.postgres.enable = true;
@@ -91,5 +96,4 @@ in
   outputs = {
     inherit sqlbag;
   };
-
 }

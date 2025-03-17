@@ -30,8 +30,6 @@ all = [
 dev = [
     { include-group = "test" },
     { include-group = "typing" },
-    { include-group = "mysql"},
-    { include-group = "postgresql"},
 ]
 typing = [
     "mypy",
