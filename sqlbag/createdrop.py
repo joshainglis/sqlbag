@@ -168,7 +168,7 @@ def build_url(
     if dialect == "postgresql":
         host = host or os.getenv("PGHOST", "localhost")
         port = port or os.getenv("PGPORT", "5432")
-        username = username or _current_username() or "postgres"
+        username = username or os.getenv("PGUSER") or _current_username() or "postgres"
         database = database or "postgres"
         if host.startswith("/"):
             url = f"postgresql://{userpass(username, password)}/{database}?host={host}&port={port}"

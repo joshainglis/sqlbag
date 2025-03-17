@@ -17,13 +17,21 @@ def exists(db_url):
     return e
 
 
-def test_createdrop(tmpdir):
+def test_createdrop(tmpdir, request):
+    # Get parameters from pytest configuration or environment
+    # Default to testing all databases if not specified
+    test_postgresql = request.config.getoption("--test-postgresql", default=True)
+    test_mysql = request.config.getoption("--test-mysql", default=False)
+
     sqlite_path = str(tmpdir / "testonly.db")
 
-    urls = [
-        build_url("postgresql", database="sqlbag_testonly"),
-        build_url("mysql", database="sqlbag_testonly"),
-    ]
+    urls = []
+
+    if test_postgresql:
+        urls.append(build_url("postgresql", database="sqlbag_testonly"))
+
+    if test_mysql:
+        urls.append(build_url("mysql", database="sqlbag_testonly"))
 
     for db_url in urls:
         drop_database(db_url)

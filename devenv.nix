@@ -4,32 +4,42 @@
   config,
   ...
 }:
-
+let
+  python = pkgs.python312;
+  sqlbag = python.pkgs.callPackage ./package.nix { };
+in
 {
+  # can enable this once devenv 1.4.2 is released
+  #  overlays = [
+  #    (final: prev: {
+  #      pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+  #        (python-final: python-prev: {
+  #          sqlbag = python-prev.pkgs.callPackage ./package.nix { };
+  #        })
+  #      ];
+  #    })
+  #  ];
+
   packages = [
-    pkgs.postgresql_16
-    pkgs.mariadb
+    config.services.postgres.package
+    config.services.mysql.package
     config.languages.python.package.pkgs.psycopg2
     config.languages.python.package.pkgs.pymysql
+    sqlbag
+    python.pkgs.pytest
+    python.pkgs.pytest-cov
+    python.pkgs.pytest-xdist
+    python.pkgs.pytest-sugar
+    python.pkgs.mock
+    python.pkgs.mypy
   ];
 
   languages.python = {
     enable = true;
-    package = pkgs.python312;
-    uv = {
-      enable = true;
-      sync = {
-        enable = true;
-        allExtras = true;
-      };
-    };
-    venv.enable = true;
+    package = python;
   };
 
   services.postgres.enable = true;
-  services.postgres.settings.log_min_messages = "NOTICE";
-  services.postgres.settings.client_min_messages = "NOTICE";
-  services.postgres.settings.log_min_error_statement = "NOTICE";
   services.mysql.enable = true;
   services.mysql.ensureUsers = [
     {
@@ -55,7 +65,6 @@
     let
       mariadb-admin = lib.getExe' config.services.mysql.package "mariadb-admin";
       pg_isready = lib.getExe' config.services.postgres.package "pg_isready";
-
     in
     ''
       echo "Running tests"
@@ -77,4 +86,9 @@
     ripsecrets.enable = true;
     trufflehog.enable = true;
   };
+
+  outputs = {
+    inherit sqlbag;
+  };
+
 }

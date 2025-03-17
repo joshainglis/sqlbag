@@ -45,7 +45,9 @@ MYSQL_KILLQUERY_EXPECTED = """
  and COMMAND = 'Sleep' and DB = :databasename"""
 
 
-def test_basic(db, tmpdir):
+def test_basic(db, tmpdir, request):
+    test_mysql = request.config.getoption("--test-mysql", default=True)
+
     url = copy_url(db)
 
     with S(db) as s:
@@ -66,18 +68,20 @@ def test_basic(db, tmpdir):
     with admin_db_connection("sqlite://") as c:
         pass
 
-    with temporary_database("mysql") as mysql_url:
-        url = copy_url(mysql_url)
+    # Only run MySQL tests if enabled
+    if test_mysql:
+        with temporary_database("mysql") as mysql_url:
+            url = copy_url(mysql_url)
 
-        with S(mysql_url) as s:
-            s.execute(text("select 1"))
+            with S(mysql_url) as s:
+                s.execute(text("select 1"))
 
-        with admin_db_connection(mysql_url) as c:
-            kq = _killquery(url.get_dialect().name, None, True)
-            assert kq == MYSQL_KILLQUERY_EXPECTED_ALL
-            kq = _killquery(url.get_dialect().name, url.database, False)
-            assert kq == MYSQL_KILLQUERY_EXPECTED
-            kill_other_connections(c, url.database, False)
+            with admin_db_connection(mysql_url) as c:
+                kq = _killquery(url.get_dialect().name, None, True)
+                assert kq == MYSQL_KILLQUERY_EXPECTED_ALL
+                kq = _killquery(url.get_dialect().name, url.database, False)
+                assert kq == MYSQL_KILLQUERY_EXPECTED
+                kill_other_connections(c, url.database, False)
 
     tempd = str(tmpdir / "sqlfiles")
     os.makedirs(tempd)

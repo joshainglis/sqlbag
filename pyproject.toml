@@ -1,14 +1,14 @@
 [project]
 name = "sqlbag"
-version = "0.0.1"
+version = "0.2.0"
 authors = [{ name = "Robert Lechte", email = "robertlechte@gmail.com" }]
 requires-python = ">=3.9"
 readme = "README.md"
 license = "Unlicense"
 dependencies = [
     "pendulum",
-    "sqlalchemy>=2.0.38",
-    "flask>=3.1.0",
+    "sqlalchemy>=2",
+    "flask>=3",
 ]
 
 [project.urls]
