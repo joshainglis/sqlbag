@@ -21,17 +21,18 @@ in
   #  ];
 
   packages = [
+    pkgs.git
     config.services.postgres.package
     config.services.mysql.package
     config.languages.python.package.pkgs.psycopg2
     config.languages.python.package.pkgs.pymysql
+    config.languages.python.package.pkgs.pytest
+    config.languages.python.package.pkgs.pytest-cov
+    config.languages.python.package.pkgs.pytest-xdist
+    config.languages.python.package.pkgs.pytest-sugar
+    config.languages.python.package.pkgs.mock
+    config.languages.python.package.pkgs.mypy
     sqlbag
-    python.pkgs.pytest
-    python.pkgs.pytest-cov
-    python.pkgs.pytest-xdist
-    python.pkgs.pytest-sugar
-    python.pkgs.mock
-    python.pkgs.mypy
   ];
 
   languages.python = {
